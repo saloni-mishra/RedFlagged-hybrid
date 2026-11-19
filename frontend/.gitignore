@@ -52,3 +52,6 @@ backend/.mypy_cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Keep the checked-in template even though .env.* is ignored.
+!.env.example
