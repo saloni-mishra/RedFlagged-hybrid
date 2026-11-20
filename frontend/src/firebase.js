@@ -1,6 +1,9 @@
 import { initializeApp } from "firebase/app";
 import { getAI, GoogleAIBackend } from "firebase/ai";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import {
+  initializeAppCheck,
+  ReCaptchaEnterpriseProvider,
+} from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -30,7 +33,9 @@ if (!import.meta.env.DEV && !recaptchaSiteKey) {
 }
 
 export const appCheck = initializeAppCheck(firebaseApp, {
-  provider: new ReCaptchaV3Provider(recaptchaSiteKey || ""),
+  // redflagged-web is registered in Firebase App Check with reCAPTCHA
+  // Enterprise, so the site key must be an Enterprise score-based key.
+  provider: new ReCaptchaEnterpriseProvider(recaptchaSiteKey || ""),
   isTokenAutoRefreshEnabled: true,
 });
 
