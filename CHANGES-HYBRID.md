@@ -397,3 +397,80 @@ Stage 4 Part 2 needs a tested inference service before routing can be added. Kee
    - Both AI paths fail: verify **Rules only (AI unavailable)** and that the rule-based score/risk remain visible.
    - First analysis: verify the Pyodide loading status appears.
    - Model download: verify the download progress bar and percentage appear.
+
+## Stage 6 — Deployment preparation
+
+### Step 1 — Branch switch
+
+- Confirmed a clean working tree and switched from `main` to `hybrid-inference`.
+- No code changes were made in this step.
+
+### Step 2 — Make Gemini optional in the FastAPI backend
+
+**Built**
+
+- Removed the import-time failure when `GEMINI_API_KEY` is missing.
+- The Gemini client is now created only when the key is configured.
+- FastAPI can start and serve PDF extraction without a Gemini key.
+- Added `_require_gemini_client()`:
+  - returns the configured client when available,
+  - raises a clear HTTP 503 when a legacy Gemini-backed feature is requested without a key.
+- Preserved:
+  - `/api/extract-text` raw text behavior,
+  - `/api/extract-text` PDF extraction through `pypdf`,
+  - `/api/extract-text` image extraction through Gemini when configured,
+  - `/api/analyze` Gemini analysis and rules-only fallback when Gemini is configured.
+- When the key is missing:
+  - image extraction returns HTTP 503 with a configuration message,
+  - `/api/analyze` returns HTTP 503 with a configuration message,
+  - PDF extraction still works normally.
+- Did not change Python rules, scoring, prompts, frontend files, routes, request formats, or response formats.
+
+**Verification results**
+
+- Mocked backend import and endpoint checks: **6/6 passed**
+  - imports without `GEMINI_API_KEY`,
+  - PDF extraction works without Gemini,
+  - image extraction returns 503 without Gemini,
+  - `/api/analyze` returns 503 without Gemini,
+  - image extraction uses Gemini when configured,
+  - `/api/analyze` uses Gemini when configured.
+- `backend/t.py`: **30/30 samples passed**, `failures: 0`.
+- `pytest` is not installed in the current environment, so the existing pytest-based backend tests could not be run without installing dependencies.
+
+**Files changed**
+
+- `backend/main.py`
+- `CHANGES-HYBRID.md`
+
+**Important limitation**
+
+Full FastAPI startup was not executed against the real installed backend dependencies because `fastapi`, `pypdf`, `PIL`, `dotenv`, and `google-genai` are not installed in this environment. The import and endpoint behavior was verified with equivalent mocked modules; full dependency installation remains a deployment-environment step.
+
+### Step 3 — Finalize production Vercel origin in CORS
+
+**Built**
+
+- Final FastAPI CORS `allow_origins` list:
+  - `https://red-flagged-hybrid.vercel.app`
+  - `http://localhost:5173`
+  - `http://127.0.0.1:5173`
+- Removed the older `https://red-flagged-nu.vercel.app` origin.
+- Did not use wildcard origins.
+- Preserved `allow_credentials`, `allow_methods`, and `allow_headers` unchanged.
+- No frontend files, Python rules, scoring, prompts, or other backend behavior changed.
+
+**Verification results**
+
+- Python syntax/compile check passed.
+- `python -B t.py`: 30/30 samples passed, `failures: 0`.
+
+**Files changed**
+
+- `backend/main.py`
+- `CHANGES-HYBRID.md`
+
+**Still required**
+
+- Confirm the Vercel production deployment uses exactly `https://red-flagged-hybrid.vercel.app` as its origin.
+- Ensure the backend service is redeployed for the CORS change to take effect.

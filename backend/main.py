@@ -28,11 +28,23 @@ load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("GEMINI_API_KEY")
 
-if not api_key:
-    raise RuntimeError(
-        f"GEMINI_API_KEY not found. Expected .env at: {env_path}"
-    )
-client = genai.Client(api_key=api_key)
+# Gemini is optional. PDF extraction works without it, while the legacy
+# image-extraction branch and /api/analyze return a controlled 503 when it is
+# not configured.
+client = genai.Client(api_key=api_key) if api_key else None
+
+
+def _require_gemini_client():
+    """Return the Gemini client or raise a clear configuration error."""
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Gemini is not configured on this server. "
+                "Set GEMINI_API_KEY to use image extraction or AI analysis."
+            ),
+        )
+    return client
 
 
 # -----------------------------
@@ -91,7 +103,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://red-flagged-nu.vercel.app",
+        "https://red-flagged-hybrid.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173"
     ],
@@ -239,9 +251,10 @@ async def extract_text(
             return {"text": extracted.strip()}
 
         else:
+            gemini_client = _require_gemini_client()
             try:
                 image = Image.open(io.BytesIO(content))
-                response = client.models.generate_content(
+                response = gemini_client.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=[
                         image,
@@ -250,6 +263,8 @@ async def extract_text(
                 )
                 extracted_text = response.text.strip() if response.text else ""
                 return {"text": extracted_text}
+            except HTTPException:
+                raise
             except Exception as e:
                 print(f"Extraction failed: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -349,6 +364,8 @@ Return the result using the required JSON schema.
 @app.post("/api/analyze", response_model=NoticeAnalysisResponse)
 def run_analysis(text: str = Form(...)):
 
+    gemini_client = _require_gemini_client()
+
     rule_results = analyze_rules(text)
     language = rule_results.get("language", "en")
 
@@ -361,7 +378,7 @@ def run_analysis(text: str = Form(...)):
     prompt = _build_prompt(text, rule_results, knowledge, language)
 
     try:
-        response = client.models.generate_content(
+        response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
