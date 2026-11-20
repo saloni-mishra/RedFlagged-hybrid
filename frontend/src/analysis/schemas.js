@@ -44,6 +44,55 @@ export const GEMINI_ANALYSIS_JSON_SCHEMA = {
   additionalProperties: false,
 };
 
+/**
+ * AI-only response schema. This is the Stage 3 Gemini schema restricted to the
+ * structured-output fields documented for both cloud and on-device models:
+ * type, properties, required, items, and enum.
+ */
+export const AI_RED_FLAG_SCHEMA = {
+  type: "object",
+  properties: {
+    indicator: { type: "string" },
+    evidence: { type: "string" },
+    explanation: { type: "string" },
+  },
+  required: ["indicator", "evidence", "explanation"],
+};
+
+export const GEMINI_ANALYSIS_AI_SCHEMA = {
+  type: "object",
+  properties: {
+    situation_type: { type: "string" },
+    risk_level: {
+      type: "string",
+      enum: ["LOW", "MEDIUM", "HIGH"],
+    },
+    summary: { type: "string" },
+    red_flags: {
+      type: "array",
+      items: AI_RED_FLAG_SCHEMA,
+    },
+    safe_next_steps: {
+      type: "array",
+      items: { type: "string" },
+    },
+    verification_guidance: {
+      type: "array",
+      items: { type: "string" },
+    },
+    disclaimer: { type: "string" },
+  },
+  required: [
+    "situation_type",
+    "risk_level",
+    "summary",
+    "red_flags",
+    "safe_next_steps",
+    "verification_guidance",
+    "disclaimer",
+  ],
+};
+
 export const RULE_BREAKDOWN_JSON_SCHEMA = {
   type: "object",
   properties: {

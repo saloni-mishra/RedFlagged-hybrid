@@ -7,6 +7,23 @@ export {
   ruleRows,
 } from "./response.js";
 export {
+  AiResponseError,
+  buildCloudModelParams,
+  buildDeviceCreateOptions,
+  buildDeviceModelParams,
+  checkDeviceAvailability,
+  CLOUD_MODEL,
+  createCloudModel,
+  createDeviceModel,
+  DEVICE_LANGUAGE,
+  generateAiJson,
+  initializeDeviceInference,
+  parseAiJson,
+  validateAiResponse,
+} from "./firebaseInference.js";
+export {
+  AI_RED_FLAG_SCHEMA,
+  GEMINI_ANALYSIS_AI_SCHEMA,
   GEMINI_ANALYSIS_JSON_SCHEMA,
   NOTICE_ANALYSIS_JSON_SCHEMA,
   NOTICE_ANALYSIS_REQUIRED_FIELDS,

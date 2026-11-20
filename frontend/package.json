@@ -9,7 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "check:rules-parity": "node scripts/check-rules-parity.mjs",
-    "test:analysis": "node --test test/analysis.test.js"
+    "test": "node --test test/analysis.test.js test/firebaseInference.test.js",
+    "test:analysis": "node --test test/analysis.test.js",
+    "test:inference": "node --test test/firebaseInference.test.js"
   },
   "dependencies": {
     "firebase": "^13.4.0",

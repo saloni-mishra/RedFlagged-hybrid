@@ -159,3 +159,64 @@ Stage 4 needs the prompt, knowledge, and response-building logic available in th
 1. Run `cd frontend && npm run test:analysis`. All 10 analysis tests should pass.
 2. Run `npm run lint` and `npm run build`.
 3. Stage 3 is not wired into the UI yet; Stage 5 will replace the `/api/analyze` fetch and add the visible routing badge.
+
+## Stage 4 Part 1 — Firebase AI Logic inference service
+
+**Built**
+
+- Added `frontend/src/analysis/firebaseInference.js`, a standalone inference service with no routing decisions and no UI wiring.
+- Added separate model configurations:
+  - On-device: `InferenceMode.ONLY_ON_DEVICE`
+  - Cloud: `InferenceMode.ONLY_IN_CLOUD`
+  - Cloud model: `gemini-3.5-flash-lite`
+- Added `GEMINI_ANALYSIS_AI_SCHEMA`, a simplified version of the Stage 3 Gemini schema using only the documented structured-output fields (`type`, `properties`, `required`, `items`, `enum`).
+- Configured on-device structured output through `onDeviceParams.promptOptions.responseConstraint`.
+- Configured cloud structured output through `inCloudParams.generationConfig.responseMimeType` and `responseSchema`.
+- Added on-device availability detection using the public Chrome `LanguageModel.availability()` API. Firebase’s internal `ChromeAdapter` is not called.
+- Used the same language options for availability and model creation:
+  - `expectedInputs: [{ type: "text", languages: ["en"] }]`
+  - `expectedOutputs: [{ type: "text", languages: ["en"] }]`
+- Added `initializeDeviceInference(model, onProgress)` which forwards `initializeDeviceModel` progress values from 0 to 1. It is documented as requiring a user interaction.
+- Added `generateAiJson(model, prompt)` which:
+  - reads `result.response.inferenceSource` after every successful generation,
+  - parses JSON,
+  - validates the full AI response structure,
+  - rejects invalid JSON, missing required fields, and wrong data types,
+  - accepts contract-valid empty strings and empty arrays,
+  - strips unexpected AI fields.
+- Aligned runtime validation with the Python/Stage 3 contract:
+  - empty `red_flags`, `safe_next_steps`, and `verification_guidance` arrays are accepted,
+  - empty strings are accepted in required text fields, red-flag fields, and string arrays,
+  - any string is accepted for the AI `risk_level` (the final risk still comes from Python),
+  - missing fields and incorrect types are still rejected.
+- Added `AiResponseError` with codes `invalid-json` and `invalid-response`, retaining the SDK-reported `inferenceSource` for debugging and fallback reporting.
+- Did not make routing decisions, modify `App.jsx`, change backend files, or alter the Python rule engine.
+
+**Why**
+
+Stage 4 Part 2 needs a tested inference service before routing can be added. Keeping model creation, availability detection, initialization, generation, JSON validation, and actual-source reporting separate makes the routing layer smaller and easier to test.
+
+**Verification results**
+
+- `npm test`: **29/29 passing** across Stage 3 and Stage 4 Part 1 tests.
+- `npm run test:inference`: **19/19 passing**
+- `npm run test:analysis`: **10/10 passing**
+- `npm run lint`: passes; only the pre-existing `App.jsx` warnings remain.
+- `npm run build`: passes.
+- Tests cover device configuration, cloud configuration, model factory injection, schema restrictions, availability options, missing API handling, download progress, initialization failure, device success, cloud success, actual `inferenceSource` reporting, invalid JSON, invalid structure, contract-valid empty values, missing-field rejection, wrong-type rejection, extra-field removal, and direct parse/validate helpers.
+
+**Files changed**
+
+- `frontend/src/analysis/firebaseInference.js`
+- `frontend/src/analysis/schemas.js`
+- `frontend/src/analysis/index.js`
+- `frontend/test/firebaseInference.test.js`
+- `frontend/package.json`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm run test:inference`. All 19 inference-service tests should pass.
+2. Run `npm run test:analysis` to confirm Stage 3 remains intact.
+3. Run `npm run lint` and `npm run build`.
+4. Part 1 is not wired into the UI yet. Part 2 will add routing and the requested/actual path reporting.
