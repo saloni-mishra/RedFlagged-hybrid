@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Offline rule engine test</title>
+  </head>
+  <body>
+    <h1>Offline rule engine test</h1>
+    <p>
+      Runs <code>backend/rules.py</code> unchanged in Pyodide (Python 3.12)
+      inside a Web Worker. The runtime loads on the first click.
+    </p>
+
+    <label for="text">Notice text</label>
+    <br />
+    <textarea id="text" rows="6" cols="80">आपका खाता ब्लॉक हो जाएगा। तुरंत ₹499 का भुगतान करें और ओटीपी साझा करें</textarea>
+    <br />
+    <button id="run">Analyze rules</button>
+
+    <pre id="status">Engine not loaded. Pyodide loads on first analysis.</pre>
+    <pre id="summary"></pre>
+    <pre id="out"></pre>
+
+    <script type="module" src="/src/rules-test.js"></script>
+  </body>
+</html>

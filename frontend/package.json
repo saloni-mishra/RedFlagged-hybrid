@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:rules-parity": "node scripts/check-rules-parity.mjs"
   },
   "dependencies": {
     "firebase": "^13.4.0",
@@ -23,6 +24,7 @@
     "autoprefixer": "^10.6.0",
     "oxlint": "^1.81.0",
     "postcss": "^8.5.28",
+    "pyodide": "0.27.8",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.0"
   }

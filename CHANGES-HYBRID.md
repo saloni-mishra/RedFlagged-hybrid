@@ -60,3 +60,54 @@ Firebase App Check rejects a v3 token for an app registered with reCAPTCHA Enter
 
 1. Local: run `npm run dev`, open `/ai-test.html`, and confirm both test buttons still work with the debug token.
 2. Production: set `VITE_RECAPTCHA_SITE_KEY` to the reCAPTCHA Enterprise score-based site key, build, serve the app, and confirm the cloud test succeeds with App Check enforcement enabled.
+
+## Stage 2 — Rule engine in the browser via Pyodide
+
+**Built**
+
+- Pinned Pyodide `0.27.8`, which runs CPython `3.12.7` — the same version as the local backend.
+- Added a lazy-loaded Web Worker (`frontend/src/pyodide/rulesWorker.js`) that loads Pyodide from the jsDelivr CDN only on the first analysis request.
+- Loaded `backend/rules.py` and `backend/knowledge.py` **unchanged** through Vite `?raw` imports, writing the exact source into Pyodide’s virtual filesystem. There is no second copy of the rule logic.
+- Added `frontend/src/pyodide/dispatch.py`, a thin JSON bridge that imports `analyze_rules` and `retrieve_context`.
+- Exposed `analyzeRules(text, { lang, onStatus })` from `frontend/src/pyodide/rulesEngine.js`. It returns the same dictionary as Python, with the result transferred as JSON text before parsing.
+- Added loading, analyzing, done, and error states through the `onStatus` callback, including the measured engine load time and Python/Pyodide versions.
+- Added `frontend/rules-test.html` and `frontend/src/rules-test.js` to exercise the Worker in a browser and display the result JSON and timings.
+- Added `frontend/scripts/check-rules-parity.mjs` and the `npm run check:rules-parity` script. It extracts the 30 samples from `backend/t.py`, runs them through native Python and Pyodide, and compares results.
+- Added `pyodide` as an exact dev dependency and allowed Vite to read the backend sources from the repository root.
+
+**Why**
+
+Running the existing Python rule engine unchanged keeps one source of truth for scores and risk levels while moving deterministic checks into the browser. Pyodide runs in a Worker, so the UI stays responsive and the LLM is never responsible for the score.
+
+**Verification results**
+
+- Samples: 30
+- Score/level/flags parity: **30/30**
+- Full result parity: **30/30**
+- Expected-level checks from `t.py`: **30/30**
+- `retrieve_context` parity: **match**
+- Pyodide load + module import in Node: **1.6–2.8 s**
+- Browser Worker cold load from CDN: **6.6 s**
+- Analysis time after load: **1.2–5.5 ms per sample** in Node; one browser sample took about 129 ms on the first call.
+
+**Files changed**
+
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `frontend/vite.config.js`
+- `frontend/src/pyodide/config.js`
+- `frontend/src/pyodide/dispatch.py`
+- `frontend/src/pyodide/rulesEngine.js`
+- `frontend/src/pyodide/rulesWorker.js`
+- `frontend/rules-test.html`
+- `frontend/src/rules-test.js`
+- `frontend/scripts/check-rules-parity.mjs`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm run check:rules-parity`. It should report 30/30 parity for scores, levels, and flags.
+2. Run `npm run dev` and open `http://localhost:5173/rules-test.html`.
+3. Click **Analyze rules**. The first click shows the Pyodide loading state, then the score, level, flags, and full JSON. The status line shows engine load and analysis times.
+4. Optional: open `http://localhost:5173/rules-test.html?auto=1` to run the sample automatically.
+5. Run `npm run build` to confirm the normal app still builds. The Worker bundle was also checked separately with the backend `?raw` imports included.
