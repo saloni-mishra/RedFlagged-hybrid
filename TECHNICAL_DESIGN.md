@@ -257,7 +257,7 @@ Form field: `text`. Returns the `NoticeAnalysisResponse` shape.
 | Part | Platform | Configuration |
 |---|---|---|
 | Frontend | Vercel | Vite build; Firebase and App Check `VITE_*` variables; `VITE_API_URL` for PDFs |
-| Backend | Render or another FastAPI host | `GEMINI_API_KEY` optional for legacy routes; `GEMINI_MODEL` optional |
+| Backend | Render  | `GEMINI_API_KEY` optional for legacy routes; `GEMINI_MODEL` optional |
 
 CORS allows:
 
@@ -294,7 +294,7 @@ No wildcard origin is used. Secrets stay in environment variables or untracked `
 - PDF extraction depends on the FastAPI backend and `pypdf`.
 - Reading aloud depends on browser-installed voices.
 - Hinglish explanations are produced in English; Gujarati is not supported.
-- Production App Check domain allowlisting, Vercel environment variables, backend URL, and CORS still require deployment verification.
+
 
 ## 12. Testing
 
