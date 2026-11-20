@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check:rules-parity": "node scripts/check-rules-parity.mjs"
+    "check:rules-parity": "node scripts/check-rules-parity.mjs",
+    "test:analysis": "node --test test/analysis.test.js"
   },
   "dependencies": {
     "firebase": "^13.4.0",

@@ -111,3 +111,51 @@ Running the existing Python rule engine unchanged keeps one source of truth for 
 3. Click **Analyze rules**. The first click shows the Pyodide loading state, then the score, level, flags, and full JSON. The status line shows engine load and analysis times.
 4. Optional: open `http://localhost:5173/rules-test.html?auto=1` to run the sample automatically.
 5. Run `npm run build` to confirm the normal app still builds. The Worker bundle was also checked separately with the backend `?raw` imports included.
+
+## Stage 3 — JavaScript analysis layer
+
+**Built**
+
+- Added a pure JavaScript analysis layer under `frontend/src/analysis/`.
+- Ported the backend narrative and knowledge helpers:
+  - `retrieveContext()` from `knowledge.py`
+  - `buildPrompt()` from `_build_prompt()`
+  - `linkAssessment()` from `_link_assessment()`
+  - `ruleRows()` from `_rule_rows()`
+  - `fallbackResponse()` from `_fallback_response()`
+  - `FALLBACK_TEXT` constants
+- Added `buildAnalysisResponse()`, which merges AI narrative fields with rule-engine results while always taking `risk_level` and `calculated_score` from the rule engine.
+- Added JSON schema constants for the Gemini response, rule rows, red flags, and the final `NoticeAnalysisResponse`.
+- Confirmed the raw Python rule result uses **`rule_score`**; the final API-compatible object maps it to **`calculated_score`**.
+- Preserved `rule_breakdown[].evidence` from the raw Python rule result. The existing Pydantic model omits it, but `App.jsx` uses it for evidence highlighting.
+- Kept Hindi/English behavior, prompt wording, URL classification, and fallback messages aligned with the Python implementation.
+- Did not modify `App.jsx`, `backend/main.py`, `backend/rules.py`, `backend/knowledge.py`, PDF extraction, or any backend endpoint.
+
+**Why**
+
+Stage 4 needs the prompt, knowledge, and response-building logic available in the browser before adding Firebase AI Logic routing. Keeping these functions pure and separately tested lets the hybrid path reuse the existing backend behavior without changing the UI yet.
+
+**Verification results**
+
+- `npm run test:analysis`: **10/10 passing**
+- Tests cover English prompt generation, Hindi prompt generation, knowledge retrieval, URL assessment, normal response construction, rules-only fallback, evidence preservation, Hindi fallback, and App.jsx response-shape compatibility.
+- `npm run lint`: passes; only the pre-existing `App.jsx` warnings remain.
+- `npm run build`: passes.
+
+**Files changed**
+
+- `frontend/src/analysis/fallbackText.js`
+- `frontend/src/analysis/knowledge.js`
+- `frontend/src/analysis/prompt.js`
+- `frontend/src/analysis/response.js`
+- `frontend/src/analysis/schemas.js`
+- `frontend/src/analysis/index.js`
+- `frontend/test/analysis.test.js`
+- `frontend/package.json`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm run test:analysis`. All 10 analysis tests should pass.
+2. Run `npm run lint` and `npm run build`.
+3. Stage 3 is not wired into the UI yet; Stage 5 will replace the `/api/analyze` fetch and add the visible routing badge.
