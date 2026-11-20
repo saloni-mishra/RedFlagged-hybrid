@@ -52,3 +52,5 @@ backend/.mypy_cache/
 .DS_Store
 .idea/
 .vscode/
+
+CHANGES-HYBRID.md

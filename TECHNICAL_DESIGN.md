@@ -1,15 +1,16 @@
-# RedFlagged: Technical Design Document
+# RedFlagged Hybrid: Technical Design Document
 
 ## 1. Purpose
 
-RedFlagged helps people spot warning signs in suspicious messages (SMS, WhatsApp, email, PDFs, screenshots) that imitate banks, government departments, couriers, employers or payment services. It supports English and Hindi.
+RedFlagged Hybrid helps people spot warning signs in suspicious messages (SMS, WhatsApp, email, PDFs, screenshots) that imitate banks, government departments, couriers, employers, or payment services. It supports English and Hindi.
 
 Design goals:
 
-1. **Transparent scoring.** The risk score comes from deterministic rules that can be inspected, not from an AI's opinion.
-2. **Useful explanations.** An AI model explains the findings in plain language, in the language of the message.
-3. **Never fail silently.** If the AI is unavailable, the user still gets a score and safety steps.
+1. **Transparent scoring.** The risk score comes from deterministic Python rules that can be inspected, not from an AI's opinion.
+2. **Useful explanations.** AI explains the findings in plain language while the Python rules remain authoritative.
+3. **Never fail silently.** If AI is unavailable, the user still receives a rule-based score, risk level, evidence, and safety steps.
 4. **Safe by default.** The app gives verification guidance and never claims a message is legally genuine or fake.
+5. **Hybrid by design.** Short English text can run on-device; other cases use cloud inference. The UI reports the actual inference source.
 
 Non-goals: legal advice, proving that a document is authentic, or detecting every possible scam.
 
@@ -18,27 +19,33 @@ Non-goals: legal advice, proving that a document is authentic, or detecting ever
 ```mermaid
 flowchart TD
     U["User (browser)"] --> FE["Frontend: React + Vite + Tailwind (Vercel)"]
-    FE -->|"POST /api/extract-text (file or text)"| API["Backend: FastAPI (Render)"]
-    FE -->|"POST /api/analyze (message text)"| API
+    FE --> IMG{"Input type"}
+    IMG -->|"Text"| TEXT["Message text"]
+    IMG -->|"JPEG / PNG"| FBCLOUD["Firebase AI Logic cloud vision"]
+    IMG -->|"PDF"| API["FastAPI backend"]
+    FBCLOUD --> TEXT
+    API -->|"POST /api/extract-text"| PDF["pypdf text extraction"]
+    PDF --> TEXT
 
-    API --> EX{"Input type"}
-    EX -->|"PDF"| PDF["pypdf text extraction"]
-    EX -->|"Image"| VIS["Gemini vision text extraction"]
-    EX -->|"Plain text"| TXT["Text used as is"]
-
-    API --> RULES["Rule engine (rules.py)"]
-    API --> KB["Knowledge retrieval (knowledge.py)"]
-    RULES --> SCORE["Score 0-100 + risk level + evidence"]
+    TEXT --> WORKER["Pyodide Web Worker"]
+    WORKER --> RULES["Unchanged backend/rules.py"]
+    WORKER --> KB["Unchanged backend/knowledge.py"]
+    RULES --> SCORE["Score, risk level, flags, evidence, URL classification"]
     KB --> CTX["Curated institutional context"]
 
-    SCORE --> GEM["Gemini analysis (structured JSON)"]
-    CTX --> GEM
-    GEM -->|"success"| RES["Response: score, level, rule breakdown, summary, red flags, safe steps"]
-    GEM -.->|"quota, timeout or bad JSON"| FB["Backup mode: fixed Hindi/English text from rule results"]
-    FB --> RES
-    SCORE --> RES
-    RES --> FE
-    FE --> OUT["Results page: read aloud (Web Speech API), copy and share"]
+    SCORE --> PROMPT["Stage 3 prompt + response builders"]
+    CTX --> PROMPT
+    PROMPT --> ROUTE{"Hybrid router"}
+    ROUTE -->|"Short English"| DEVICE["Chrome Prompt API on-device"]
+    ROUTE -->|"Hindi, long text, PDF"| CLOUD["Firebase AI Logic cloud"]
+    DEVICE --> PARSE["Validated JSON narrative"]
+    CLOUD --> PARSE
+    DEVICE -.->|"failure"| CLOUD
+    CLOUD -.->|"failure"| FALLBACK["Rules-only fallback"]
+    PARSE --> RESPONSE["Final response: Python score/risk + AI narrative"]
+    FALLBACK --> RESPONSE
+    RESPONSE --> FE
+    FE --> OUT["Results page: read aloud, copy, share/export"]
 ```
 
 ## 3. Request flow
@@ -47,40 +54,55 @@ flowchart TD
 sequenceDiagram
     participant User
     participant Frontend
-    participant Backend
-    participant Rules as Rule engine
-    participant KB as Knowledge base
-    participant Gemini
+    participant Worker as Pyodide Worker
+    participant Firebase as Firebase AI Logic
+    participant Backend as FastAPI
 
     User->>Frontend: Paste text or upload file
-    Frontend->>Backend: POST /api/extract-text (if a file)
-    Backend-->>Frontend: Extracted text
-    Frontend->>Backend: POST /api/analyze (text)
-    Backend->>Rules: analyze_rules(text)
-    Rules-->>Backend: score, level, language, rule breakdown
-    Backend->>KB: retrieve_context(text)
-    KB-->>Backend: Relevant institutional guidance
-    Backend->>Gemini: Prompt (message, rule findings, context, language instruction)
-    alt Gemini responds
-        Gemini-->>Backend: Structured JSON (summary, red flags, steps)
-    else Gemini fails
-        Backend->>Backend: Build backup response from rule results
+    alt JPEG / PNG
+        Frontend->>Firebase: Cloud image text extraction
+        Firebase-->>Frontend: Extracted text
+    else PDF
+        Frontend->>Backend: POST /api/extract-text
+        Backend-->>Frontend: pypdf extracted text
     end
-    Backend-->>Frontend: Final JSON (score and level always from the rule engine)
-    Frontend-->>User: Results, read aloud, share
+
+    Frontend->>Worker: analyze_rules(text)
+    Worker-->>Frontend: rule score, level, flags, evidence, language
+    Frontend->>Frontend: Retrieve knowledge and build prompt
+    Frontend->>Frontend: Choose requested path
+
+    alt Device eligible and available
+        Frontend->>Firebase: initializeDeviceModel + generateContent
+        Firebase-->>Frontend: Narrative JSON + inferenceSource
+        Note over Frontend: Device failure -> one cloud attempt
+    else Cloud path
+        Frontend->>Firebase: Cloud generateContent
+        Firebase-->>Frontend: Narrative JSON + inferenceSource
+    end
+
+    Frontend->>Frontend: Validate AI JSON; merge with Python rule result
+    Frontend-->>User: Existing results UI with actual-path badge
 ```
 
 ## 4. Components
 
 | Component | File | Responsibility |
 |---|---|---|
-| Frontend | `frontend/` | Input, results page, read aloud (Web Speech API), copy/share |
-| API | `backend/main.py` | Routes, CORS, prompt building, Gemini call, backup mode |
-| Rule engine | `backend/rules.py` | Deterministic detection, scoring, language detection, Hindi and English explanations |
-| Knowledge base | `backend/knowledge.py`, `knowledge/` | Curated institutional guidance matched to the message |
-| Tests | `backend/t.py` | 30 sample messages (Hindi, Hinglish, English) with expected risk levels |
+| UI | `frontend/src/App.jsx` | Input, file upload, results rendering, speech, share/export, status/badge display |
+| Hybrid router | `frontend/src/hybridAnalyze.js` | Path eligibility, device availability, one cloud fallback, rules-only fallback, actual-path metadata |
+| Analysis layer | `frontend/src/analysis/` | Prompt, knowledge, response builder, schemas, Firebase inference service, image extraction |
+| Pyodide bridge | `frontend/src/pyodide/` | Web Worker, unchanged Python sources, JSON dispatch, loading/progress states |
+| Upload processing | `frontend/src/uploadPipeline.js` | PDF vs image vs unsupported classification; backend/Firebase extraction |
+| Status mapping | `frontend/src/inferenceStatus.js` | Badge labels and loading/progress messages |
+| Backend | `backend/main.py` | PDF extraction, CORS, legacy `/api/analyze` and image extraction, optional Gemini |
+| Rule engine | `backend/rules.py` | Deterministic detection, scoring, language detection, Hindi/English explanations |
+| Knowledge | `backend/knowledge.py` | Curated institutional guidance matched to the message |
+| Regression tests | `backend/t.py`, `frontend/test/` | 30 Python sample messages and frontend unit/integration tests |
 
 ## 5. Rule engine design
+
+The Python rule engine remains unchanged and authoritative. In the browser it runs through Pyodide 0.27.8 (CPython 3.12.7) inside a Web Worker.
 
 ### 5.1 Rules and weights
 
@@ -97,8 +119,8 @@ sequenceDiagram
 
 Triggered rules add up to raw points. A saturating curve turns them into a 0 to 100 score:
 
-```
-score = round(100 * (1 - e^(-raw_points / 38)))
+```text
+score = round(100 * (1 - exp(-raw_points / 38)))
 ```
 
 | Raw points | Score | Level |
@@ -108,7 +130,7 @@ score = round(100 * (1 - e^(-raw_points / 38)))
 | 65 to 70 (two rules) | 82 to 84 | HIGH |
 | 105 (three rules) | 94 | HIGH |
 
-Thresholds: below 25 is LOW, 25 to 64 is MEDIUM, 65 and above is HIGH. The level is derived from the score, so the two always agree. Gemini does not change either value.
+Thresholds: below 25 is LOW, 25 to 64 is MEDIUM, 65 and above is HIGH. The level is derived from the score, so the two always agree. AI does not change either value.
 
 ### 5.3 Matching and negation
 
@@ -131,74 +153,184 @@ Design decisions:
 
 `detect_language()` returns `hi` when more than 20 percent of the letters are Devanagari, otherwise `en`. The result drives:
 
-- the language of the rule explanations and flags (`rule_hi` holds the Hindi rule name),
-- the language instruction sent to Gemini,
-- the language of the backup-mode text.
+- the language of rule explanations and flags (`rule_hi` holds the Hindi rule name),
+- the language instruction sent to the AI prompt,
+- the language of the rules-only fallback text.
 
-Roman-script Hindi (Hinglish) is detected by the rules but is treated as English for output.
+Roman-script Hindi (Hinglish) is detected by the rules but is treated as English for output. Hindi/Devanagari output is not supported by the on-device model, so it is routed to cloud inference.
 
-## 6. AI analysis
+## 6. Hybrid AI analysis
 
-Gemini receives the message, the rule findings, the detected language, retrieved institutional context and guidance not to treat well-known domains as suspicious by themselves. It must return JSON matching a fixed schema (`GeminiAnalysisResponse`). The backend takes the situation type, summary, red flags, safe steps, verification guidance and disclaimer from Gemini, and takes the **score and risk level from the rule engine**.
+### 6.1 Prompt and response schema
 
-### Backup mode
+The frontend analysis layer is a JavaScript port of the original backend prompt/response helpers:
 
-If the Gemini call raises any error (quota exhausted, timeout, network error, invalid JSON), the backend returns HTTP 200 with the same response schema, built from the rule results: score, level, triggered rules with evidence, plus fixed safety steps, verification guidance and disclaimer in Hindi or English. An error response would also have no CORS headers, which browsers report as a CORS failure, so avoiding errors matters for the frontend too.
+- `buildPrompt()` mirrors the deterministic prompt builder.
+- `retrieveContext()` mirrors the curated knowledge retrieval.
+- `linkAssessment()` and `ruleRows()` preserve URL classification and rule evidence.
+- `fallbackResponse()` builds the rules-only response.
+- The AI response schema is restricted to documented structured-output fields.
 
-## 7. API contract
+The final response always takes `risk_level`, `calculated_score`, `rule_breakdown`, rule evidence, URL classification, and extracted arrays from the Python rule result. AI supplies only narrative fields: `situation_type`, `summary`, `red_flags`, `safe_next_steps`, `verification_guidance`, and `disclaimer`.
+
+### 6.2 Routing
+
+| Condition | Requested path |
+|---|---|
+| PDF-derived text | Cloud |
+| Detected language is not `en` | Cloud |
+| Message longer than 8,000 characters | Cloud |
+| Estimated prompt + schema above the on-device budget | Cloud |
+| Short English text within budget | On-device first |
+
+The on-device budget is derived conservatively from the Chrome Prompt API limit of 9,216 tokens:
+
+- 2,500 tokens reserved for output,
+- 15% safety factor,
+- input budget `5,708` tokens,
+- conservative estimator `ceil(code points / 3)`.
+
+The full prompt and response schema are included in the estimate. If the device path fails or is unavailable, one cloud attempt is made. If both AI paths fail, the rules-only fallback is returned.
+
+### 6.3 On-device and cloud configuration
+
+- On-device uses `InferenceMode.ONLY_ON_DEVICE`, Chrome Prompt API availability, English input/output options, and `onDeviceParams.promptOptions.responseConstraint`.
+- Cloud uses `InferenceMode.ONLY_IN_CLOUD`, the `gemini-3.5-flash-lite` model, and `inCloudParams.generationConfig.responseSchema`.
+- Device initialization runs from the Analyze click and reports download progress.
+- The actual source is read from `result.response.inferenceSource` (`on_device` or `in_cloud`). The UI badge uses that value, never the requested path.
+
+### 6.4 Fallback
+
+- Device failure/unavailability → one cloud attempt.
+- Cloud failure or invalid AI JSON → rules-only response.
+- Rules-only response includes the Python score, risk level, triggered rules, evidence, fixed safety steps, verification guidance, and disclaimer.
+
+## 7. Image and PDF processing
+
+### Images
+
+JPEG and PNG uploads are sent to Firebase AI Logic cloud inference for verbatim text extraction. The image binary never enters Pyodide. The extracted text then follows normal hybrid routing.
+
+### PDFs
+
+PDFs are sent to FastAPI `/api/extract-text`, which uses `pypdf`. The PDF binary never goes to Firebase AI Logic. The extracted text enters hybrid analysis with `sourceType: "pdf"`, forcing cloud inference.
+
+### Backend image branch
+
+The legacy backend image branch still uses Gemini when `GEMINI_API_KEY` is configured. Without a key it returns HTTP 503. The hybrid frontend does not use this branch.
+
+## 8. API contract
 
 ### `POST /api/extract-text`
 
-Form fields: `file` (PDF or image) or `raw_text`. Returns `{"text": "..."}`. PDF text uses `pypdf`; images use Gemini vision.
+Form fields: `file` (PDF/image) or `raw_text`. Returns `{"text": "..."}`.
 
-### `POST /api/analyze`
+- PDF: `pypdf`, no Gemini required.
+- Image: Gemini vision if configured; HTTP 503 otherwise.
+- Raw text: returned as-is.
 
-Form field: `text`. Returns:
+### `POST /api/analyze` (legacy)
 
-| Field | Description |
+Form field: `text`. Returns the `NoticeAnalysisResponse` shape.
+
+- Requires Gemini; returns HTTP 503 without `GEMINI_API_KEY`.
+- When Gemini is configured, the original Gemini analysis behavior and rules-only fallback remain.
+- The hybrid frontend does not call this route.
+
+### Final frontend response
+
+| Field | Source |
 |---|---|
-| `situation_type` | Short label of the scenario |
-| `risk_level` | `LOW`, `MEDIUM` or `HIGH` (from the rule engine) |
-| `calculated_score` | 0 to 100 (from the rule engine) |
-| `rule_breakdown` | Six rows: `rule`, `points`, `triggered`, `explanation` (Hindi for Hindi messages) |
-| `summary` | Plain-language assessment |
-| `red_flags` | List of `indicator`, `evidence`, `explanation` |
-| `safe_next_steps` | What the user should do |
-| `verification_guidance` | How to verify through official channels |
-| `disclaimer` | Not legal advice |
-| `amounts`, `payment_handles`, `urgency_phrases`, `extracted_urls` | Extracted information |
+| `situation_type` | AI narrative or fallback text |
+| `risk_level` | **Python rule engine** |
+| `calculated_score` | **Python rule engine** |
+| `rule_breakdown` | **Python rule engine** (including evidence and URL classification) |
+| `summary` | AI narrative or fallback text |
+| `red_flags` | AI narrative or fallback |
+| `safe_next_steps` | AI narrative or fallback |
+| `verification_guidance` | AI narrative or fallback |
+| `disclaimer` | AI narrative or fallback |
+| `amounts`, `payment_handles`, `urgency_phrases`, `extracted_urls` | **Python rule engine** |
 
-## 8. Deployment and configuration
+## 9. Deployment and configuration
 
 | Part | Platform | Configuration |
 |---|---|---|
-| Frontend | Vercel | `VITE_API_URL` points to the backend |
-| Backend | Render | `GEMINI_API_KEY` (required), `GEMINI_MODEL` (optional) set as environment variables |
+| Frontend | Vercel | Vite build; Firebase and App Check `VITE_*` variables; `VITE_API_URL` for PDFs |
+| Backend | Render or another FastAPI host | `GEMINI_API_KEY` optional for legacy routes; `GEMINI_MODEL` optional |
 
-CORS allows only the deployed frontend and the local development origins (`localhost:5173`, `127.0.0.1:5173`). Secrets are kept in environment variables and `.env` files that are not committed; `.env.example` files document the names.
+CORS allows:
 
-## 9. Security and privacy
+```text
+https://red-flagged-hybrid.vercel.app
+http://localhost:5173
+http://127.0.0.1:5173
+```
 
-- The API key stays on the server and never reaches the browser.
-- Messages are sent to the Gemini API for analysis and are not stored by the application.
-- The app does not follow or open links found in messages; it only analyses their structure.
-- Output always includes a disclaimer, and verification advice points users to official channels they find themselves.
+No wildcard origin is used. Secrets stay in environment variables or untracked `.env` files; `.env.example` documents names only.
 
-## 10. Limitations and trade-offs
+## 10. Security and privacy
 
-- Rules only detect patterns that have been written; a scam with unfamiliar wording can score LOW. This is why the app gives guidance and not a verdict.
-- Regular-expression rules can misfire on unusual phrasing. The sample test set guards against regressions but is not exhaustive.
-- Free-tier Gemini quotas are limited, which is why backup mode exists. Backup explanations are generic.
+- On-device inference keeps eligible text on the user's device.
+- Cloud inference, image extraction, and App Check requests go through Firebase AI Logic.
+- PDFs go to the FastAPI backend for extraction.
+- The frontend App Check uses reCAPTCHA Enterprise in production; the debug token is dev-only.
+- The backend Gemini key is optional and server-side; it is never exposed to the browser.
+- The app does not follow or open links found in messages; it analyses their structure.
+- Results include a disclaimer and verification advice that points users to independently found official channels.
+- The application does not store submitted messages.
+
+## 11. Limitations and trade-offs
+
+- Rules only detect patterns that have been written; unfamiliar scam wording can score LOW.
+- Regular-expression rules can misfire on unusual phrasing.
+- On-device inference requires supported Chrome desktop and Gemini Nano availability; model download can be slow.
+- The on-device token check is a conservative estimate, not exact tokenization.
+- Hindi/Devanagari text is routed to cloud inference.
+- AI narrative can be incomplete or incorrect; invalid output falls back to cloud or rules-only.
+- Cloud inference and image extraction depend on Firebase AI Logic, App Check, network access, and quotas.
+- Pyodide is loaded from a CDN and first use can take several seconds.
+- The legacy backend `/api/analyze` and image branch still require Gemini when used.
+- PDF extraction depends on the FastAPI backend and `pypdf`.
+- Reading aloud depends on browser-installed voices.
 - Hinglish explanations are produced in English; Gujarati is not supported.
-- Reading aloud depends on voices installed on the user's device.
+- Production App Check domain allowlisting, Vercel environment variables, backend URL, and CORS still require deployment verification.
 
-## 11. Testing
+## 12. Testing
 
-`backend/t.py` is a regression script with 30 invented messages: Hindi, Hinglish and English scams; genuine notices that must stay LOW; everyday messages that must not be flagged; and URL checks. For each message it prints the score, risk level, language and triggered rules, marks it `OK` or `FAIL` against the expected level, and ends with a `failures:` count that should be 0. Run it from the `backend` folder:
+Frontend:
+
+```bash
+cd frontend
+npm test
+npm run check:rules-parity
+npm run lint
+npm run build
+```
+
+Current automated results:
+
+- `npm test`: 65/65 passed
+- Rule parity: 30/30 score/level/flags, full result parity, expected-level checks, knowledge retrieval parity
+- Lint passes with existing `App.jsx` warnings
+- Production build passes
+
+Backend rule regression:
 
 ```bash
 cd backend
-python t.py
+python -B t.py
 ```
 
-The script tests the rule engine only. It does not call Gemini, so it needs no API key and uses no quota. The sample messages are the test data; they are written directly in `t.py`.
+The 30-message script currently reports `failures: 0`.
+
+The backend pytest files require `pytest`; it is not installed in the current environment, so those tests could not be run without installing dependencies.
+
+Manual verification still required:
+
+- Real Chrome on-device inference and model download
+- Real Firebase cloud inference with production App Check
+- Real JPEG/PNG extraction
+- Real PDF extraction through the deployed backend and CORS
+- Device-unavailable cloud fallback
+- Rules-only fallback with network/cloud failure

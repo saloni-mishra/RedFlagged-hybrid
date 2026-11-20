@@ -55,3 +55,6 @@ backend/.mypy_cache/
 
 # Keep the checked-in template even though .env.* is ignored.
 !.env.example
+
+# Local development notes
+CHANGES-HYBRID.md
