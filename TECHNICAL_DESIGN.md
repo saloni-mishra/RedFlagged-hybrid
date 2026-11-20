@@ -51,6 +51,7 @@ flowchart TD
 ## 3. Request flow
 
 ```mermaid
+
 sequenceDiagram
     participant User
     participant Frontend
@@ -59,30 +60,32 @@ sequenceDiagram
     participant Backend as FastAPI
 
     User->>Frontend: Paste text or upload file
-    alt JPEG / PNG
-        Frontend->>Firebase: Cloud image text extraction
-        Firebase-->>Frontend: Extracted text
+
+    alt JPEG or PNG
+        Frontend->>Firebase: Extract image text
+        Firebase-->>Frontend: Return extracted text
     else PDF
         Frontend->>Backend: POST /api/extract-text
-        Backend-->>Frontend: pypdf extracted text
+        Backend-->>Frontend: Return extracted text
     end
 
     Frontend->>Worker: analyze_rules(text)
-    Worker-->>Frontend: rule score, level, flags, evidence, language
+    Worker-->>Frontend: Return Python rule results
     Frontend->>Frontend: Retrieve knowledge and build prompt
-    Frontend->>Frontend: Choose requested path
+    Frontend->>Frontend: Select inference path
 
-    alt Device eligible and available
-        Frontend->>Firebase: initializeDeviceModel + generateContent
-        Firebase-->>Frontend: Narrative JSON + inferenceSource
-        Note over Frontend: Device failure -> one cloud attempt
-    else Cloud path
-        Frontend->>Firebase: Cloud generateContent
-        Firebase-->>Frontend: Narrative JSON + inferenceSource
+    alt Device inference
+        Frontend->>Firebase: Initialize device model and generate content
+        Firebase-->>Frontend: Return narrative JSON and inference source
+        Note over Frontend: On device failure, attempt cloud once
+    else Cloud inference
+        Frontend->>Firebase: Generate cloud content
+        Firebase-->>Frontend: Return narrative JSON and inference source
     end
 
-    Frontend->>Frontend: Validate AI JSON; merge with Python rule result
-    Frontend-->>User: Existing results UI with actual-path badge
+    Frontend->>Frontend: Validate AI JSON and merge with Python results
+    Frontend-->>User: Display results and actual inference path
+
 ```
 
 ## 4. Components
