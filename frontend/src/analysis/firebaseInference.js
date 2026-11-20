@@ -1,9 +1,12 @@
-import { getGenerativeModel, InferenceMode } from "firebase/ai";
+import { getGenerativeModel, InferenceMode, InferenceSource } from "firebase/ai";
 
 import { GEMINI_ANALYSIS_AI_SCHEMA } from "./schemas.js";
 
 export const CLOUD_MODEL = "gemini-3.5-flash-lite";
 export const DEVICE_LANGUAGE = "en";
+export const SUPPORTED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"];
+export const IMAGE_EXTRACTION_PROMPT =
+  "Extract and transcribe all readable text from this image verbatim. Return only the extracted text and nothing else.";
 
 const REQUIRED_TEXT_FIELDS = ["situation_type", "summary", "disclaimer"];
 const REQUIRED_ARRAY_FIELDS = ["safe_next_steps", "verification_guidance"];
@@ -84,6 +87,87 @@ export function createCloudModel(
   } = {},
 ) {
   return modelFactory(ai, buildCloudModelParams({ schema, model }));
+}
+
+export function createCloudVisionModel(
+  ai,
+  { model = CLOUD_MODEL, modelFactory = getGenerativeModel } = {},
+) {
+  return modelFactory(ai, {
+    mode: InferenceMode.ONLY_IN_CLOUD,
+    inCloudParams: { model },
+  });
+}
+
+function defaultReadFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read image"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function stripDataUrlPrefix(dataUrl) {
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+}
+
+/**
+ * Extract visible text from a JPEG/PNG using Firebase AI Logic cloud inference.
+ * The image itself never enters Pyodide or the Python text rule engine.
+ */
+export async function extractImageText(
+  ai,
+  file,
+  {
+    mimeType = file?.type,
+    model = CLOUD_MODEL,
+    modelFactory = getGenerativeModel,
+    readFileAsDataUrl = defaultReadFileAsDataUrl,
+  } = {},
+) {
+  const normalizedMimeType = String(mimeType ?? "").toLowerCase();
+
+  if (!SUPPORTED_IMAGE_MIME_TYPES.includes(normalizedMimeType)) {
+    throw new Error("Only JPEG and PNG images are supported.");
+  }
+
+  const dataUrl = String(await readFileAsDataUrl(file));
+  const data = stripDataUrlPrefix(dataUrl);
+
+  if (!data) {
+    throw new Error("Could not read image data.");
+  }
+
+  const visionModel = createCloudVisionModel(ai, { model, modelFactory });
+  const result = await visionModel.generateContent([
+    IMAGE_EXTRACTION_PROMPT,
+    {
+      type: "inlineData",
+      inlineData: {
+        mimeType: normalizedMimeType,
+        data,
+      },
+    },
+  ]);
+
+  const response = result?.response;
+
+  if (!response || typeof response.text !== "function") {
+    throw new Error("Image extraction response was missing text().");
+  }
+
+  const inferenceSource = response.inferenceSource ?? null;
+
+  if (inferenceSource !== InferenceSource.IN_CLOUD) {
+    throw new Error("Image extraction did not use cloud inference.");
+  }
+
+  return {
+    text: response.text().trim(),
+    inferenceSource,
+  };
 }
 
 /**

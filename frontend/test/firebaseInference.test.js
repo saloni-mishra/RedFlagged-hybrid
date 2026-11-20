@@ -11,11 +11,15 @@ import {
   checkDeviceAvailability,
   CLOUD_MODEL,
   createCloudModel,
+  createCloudVisionModel,
   createDeviceModel,
+  extractImageText,
   generateAiJson,
   GEMINI_ANALYSIS_AI_SCHEMA,
+  IMAGE_EXTRACTION_PROMPT,
   initializeDeviceInference,
   parseAiJson,
+  SUPPORTED_IMAGE_MIME_TYPES,
   validateAiResponse,
 } from "../src/analysis/index.js";
 
@@ -383,5 +387,105 @@ test("parseAiJson and validateAiResponse are usable directly", () => {
     () => parseAiJson("{broken"),
     (error) =>
       error instanceof AiResponseError && error.code === "invalid-json",
+  );
+});
+
+test("cloud vision model config uses ONLY_IN_CLOUD and the pinned model", () => {
+  const calls = [];
+  const modelFactory = (ai, params) => {
+    calls.push({ ai, params });
+    return { fake: true };
+  };
+
+  const model = createCloudVisionModel({ name: "fake-ai" }, { modelFactory });
+
+  assert.deepEqual(model, { fake: true });
+  assert.equal(calls[0].params.mode, InferenceMode.ONLY_IN_CLOUD);
+  assert.equal(calls[0].params.inCloudParams.model, CLOUD_MODEL);
+  assert.equal(calls[0].params.inCloudParams.generationConfig, undefined);
+});
+
+test("image extraction sends JPEG/PNG inline data through cloud vision", async () => {
+  const generateCalls = [];
+  let modelParams = null;
+  const model = {
+    generateContent: async (parts) => {
+      generateCalls.push(parts);
+      return {
+        response: {
+          text: () => "  extracted image text  ",
+          inferenceSource: InferenceSource.IN_CLOUD,
+        },
+      };
+    },
+  };
+  const modelFactory = (ai, params) => {
+    modelParams = params;
+    return model;
+  };
+
+  const result = await extractImageText(
+    { name: "fake-ai" },
+    { name: "notice.png", type: "image/png" },
+    {
+      mimeType: "image/png",
+      modelFactory,
+      readFileAsDataUrl: async () => "data:image/png;base64,QUJD",
+    },
+  );
+
+  assert.equal(result.text, "extracted image text");
+  assert.equal(result.inferenceSource, InferenceSource.IN_CLOUD);
+  assert.equal(modelParams.mode, InferenceMode.ONLY_IN_CLOUD);
+  assert.equal(modelParams.inCloudParams.model, CLOUD_MODEL);
+  assert.equal(generateCalls.length, 1);
+  assert.equal(generateCalls[0][0], IMAGE_EXTRACTION_PROMPT);
+  assert.deepEqual(generateCalls[0][1], {
+    type: "inlineData",
+    inlineData: {
+      mimeType: "image/png",
+      data: "QUJD",
+    },
+  });
+  assert.deepEqual(SUPPORTED_IMAGE_MIME_TYPES, ["image/jpeg", "image/png"]);
+});
+
+test("image extraction rejects unsupported image types", async () => {
+  await assert.rejects(
+    () =>
+      extractImageText(
+        {},
+        { name: "anim.gif", type: "image/gif" },
+        {
+          mimeType: "image/gif",
+          readFileAsDataUrl: async () => "data:image/gif;base64,QUJD",
+        },
+      ),
+    /JPEG and PNG/,
+  );
+});
+
+test("image extraction rejects a non-cloud inference source", async () => {
+  const model = {
+    generateContent: async () => ({
+      response: {
+        text: () => "text",
+        inferenceSource: InferenceSource.ON_DEVICE,
+      },
+    }),
+  };
+
+  await assert.rejects(
+    () =>
+      extractImageText(
+        {},
+        { name: "notice.png", type: "image/png" },
+        {
+          mimeType: "image/png",
+          modelFactory: () => model,
+          readFileAsDataUrl: async () => "data:image/png;base64,QUJD",
+        },
+      ),
+    /cloud inference/,
   );
 });

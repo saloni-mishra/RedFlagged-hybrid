@@ -14,11 +14,15 @@ export {
   checkDeviceAvailability,
   CLOUD_MODEL,
   createCloudModel,
+  createCloudVisionModel,
   createDeviceModel,
   DEVICE_LANGUAGE,
+  extractImageText,
   generateAiJson,
+  IMAGE_EXTRACTION_PROMPT,
   initializeDeviceInference,
   parseAiJson,
+  SUPPORTED_IMAGE_MIME_TYPES,
   validateAiResponse,
 } from "./firebaseInference.js";
 export {

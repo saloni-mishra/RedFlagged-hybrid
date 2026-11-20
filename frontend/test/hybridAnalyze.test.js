@@ -127,9 +127,9 @@ function makeAnalyzer({
   const statuses = [];
 
   const analyze = createHybridAnalyzer({
-    analyzeRules: async (input) => {
+    analyzeRules: async (input, options) => {
       calls.analyze += 1;
-      return analyzeRulesImpl ? analyzeRulesImpl(input) : ruleResults;
+      return analyzeRulesImpl ? analyzeRulesImpl(input, options) : ruleResults;
     },
     checkDeviceAvailability: async () => {
       calls.availability += 1;
@@ -451,6 +451,31 @@ test("early language precheck mirrors Python's Devanagari threshold", () => {
   // Python uses a strict > 20% test, not >= 20%.
   assert.equal(isLikelyHindiText(`कख${"a".repeat(8)}`), false);
   assert.equal(isLikelyHindiText(`कख${"a".repeat(7)}`), true);
+});
+
+test("rule engine loading status is forwarded", async () => {
+  const { analyze, statuses } = makeAnalyzer({
+    analyzeRulesImpl: async (input, options) => {
+      options.onStatus?.({ state: "loading" });
+      options.onStatus?.({ state: "analyzing", loadMs: 10 });
+      return makeRuleResults();
+    },
+  });
+
+  await analyze("URGENT: Your account is blocked.");
+
+  assert.ok(
+    statuses.some(
+      (status) =>
+        status.state === "rule-engine" && status.ruleState === "loading",
+    ),
+  );
+  assert.ok(
+    statuses.some(
+      (status) =>
+        status.state === "rule-engine" && status.ruleState === "analyzing",
+    ),
+  );
 });
 
 test("mixed-script English text starts device initialization before deferred rules", async () => {

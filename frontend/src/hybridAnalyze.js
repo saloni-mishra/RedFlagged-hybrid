@@ -233,7 +233,17 @@ export function createHybridAnalyzer(dependencies = {}) {
       });
     }
 
-    const ruleResults = await analyzeRules(input);
+    const ruleResults = await analyzeRules(input, {
+      onStatus: (status) => {
+        notify({
+          state: "rule-engine",
+          ruleState: status.state,
+          loadMs: status.loadMs,
+          pythonVersion: status.pythonVersion,
+          message: status.message,
+        });
+      },
+    });
     const language = ruleResults.language === "hi" ? "hi" : "en";
 
     const knowledge = retrieveContext(input);

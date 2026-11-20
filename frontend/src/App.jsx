@@ -15,6 +15,17 @@ import {
   Copy,
 } from 'lucide-react';
 
+import { ai } from './firebase.js';
+import { hybridAnalyze } from './hybridAnalyze.js';
+import {
+  getHybridStatusMessage,
+  getInferenceBadge,
+} from './inferenceStatus.js';
+import {
+  classifyUploadFile,
+  processUploadedFile,
+} from './uploadPipeline.js';
+
 const API_BASE = import.meta.env.VITE_API_URL || "https://redflagged-hd8a.onrender.com";
 
 const DEMO_EXAMPLES = {
@@ -40,6 +51,12 @@ const RISK_STYLES = {
     bar: "bg-[#52765d]",
     border: "border-[#9dbca7]",
   },
+};
+
+const INFERENCE_BADGE_STYLES = {
+  device: "bg-[#e4eee7] text-[#356247] border-[#9dbca7]",
+  cloud: "bg-[#edf2f7] text-[#27558a] border-[#b9c8d8]",
+  rules: "bg-[#f7efdf] text-[#76501f] border-[#d5b477]",
 };
 
 function getEvidencePhrases(ruleBreakdown, notice) {
@@ -211,6 +228,10 @@ export default function App() {
   const [speechStatus, setSpeechStatus] = useState("idle");
   const [speechLanguage, setSpeechLanguage] = useState("auto");
   const [availableVoices, setAvailableVoices] = useState([]);
+  const [sourceType, setSourceType] = useState("text");
+  const [uploadNote, setUploadNote] = useState("");
+  const [inferenceMeta, setInferenceMeta] = useState(null);
+  const [deviceDownloadProgress, setDeviceDownloadProgress] = useState(null);
 
   const resultsRef = useRef(null);
   const speechChunksRef = useRef([]);
@@ -220,6 +241,7 @@ export default function App() {
 
   const riskStyles = RISK_STYLES[results?.risk_level] || RISK_STYLES.LOW;
   const warningCount = results?.red_flags?.length ?? 0;
+  const inferenceBadge = getInferenceBadge(inferenceMeta);
 
   // Cache browser voices whenever the browser updates its speech synthesizer table
   useEffect(() => {
@@ -239,23 +261,34 @@ export default function App() {
     const uploadedFile = e.target.files[0];
     if (!uploadedFile) return;
 
+    const uploadKind = classifyUploadFile(uploadedFile);
+
     setFile(uploadedFile);
     setLoading(true);
-    setStatusMessage("Extracting text from file...");
-
-    const formData = new FormData();
-    formData.append("file", uploadedFile);
+    setStatusMessage(
+      uploadKind === "pdf"
+        ? "Extracting PDF text on the server..."
+        : uploadKind === "image"
+          ? "Extracting image text with Firebase AI Logic (cloud)..."
+          : "Preparing file...",
+    );
+    setUploadNote("");
+    setDeviceDownloadProgress(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/extract-text`, {
-        method: "POST",
-        body: formData,
+      const processed = await processUploadedFile(uploadedFile, {
+        ai,
+        apiBase: API_BASE,
       });
 
-      const data = await res.json();
-      setInputText(data.text || "");
+      setInputText(processed.text || "");
+      setSourceType(processed.sourceType);
+      setUploadNote(processed.note || "");
     } catch (err) {
-      alert("Error extracting text.");
+      alert(err?.message || "Error extracting text.");
+      setInputText("");
+      setSourceType("text");
+      setUploadNote("");
     } finally {
       setLoading(false);
       setStatusMessage("");
@@ -274,25 +307,60 @@ export default function App() {
     setSpeechStatus("idle");
     setShareMenuOpen(false);
     setLoading(true);
-    setStatusMessage("Running deterministic rules & consulting knowledge base...");
+    setStatusMessage("Starting analysis...");
+    setDeviceDownloadProgress(null);
+
+    const analysisText = inputText;
+    const analysisSourceType = sourceType;
+
+    // Start immediately so Chrome can use this click's user activation for
+    // on-device model initialization.
+    const analysisPromise = hybridAnalyze(analysisText, {
+      ai,
+      sourceType: analysisSourceType,
+      onStatus: (status) => {
+        const message = getHybridStatusMessage(status);
+        if (message !== null) setStatusMessage(message);
+
+        if (status.state === "device-download") {
+          const progress = Number(status.progress ?? 0);
+          setDeviceDownloadProgress(
+            Math.max(0, Math.min(100, Math.round(progress * 100))),
+          );
+        }
+
+        if (
+          status.state === "done" ||
+          status.state === "device-error" ||
+          status.state === "cloud-error" ||
+          status.state === "rules-only"
+        ) {
+          setDeviceDownloadProgress(null);
+        }
+      },
+    });
 
     try {
-      const formData = new FormData();
-      formData.append("text", inputText);
+      const result = await analysisPromise;
 
-      const res = await fetch(`${API_BASE}/api/analyze`, {
-        method: "POST",
-        body: formData,
+      setResults(result.analysis);
+      setAnalyzedText(analysisText);
+      setInferenceMeta({
+        path: result.path,
+        requestedPath: result.requestedPath,
+        actualPath: result.actualPath,
+        inferenceSource: result.inferenceSource,
+        reason: result.reason,
+        deviceError: result.deviceError,
+        cloudError: result.cloudError,
+        responseError: result.responseError,
       });
-
-      const data = await res.json();
-      setResults(data);
-      setAnalyzedText(inputText);
     } catch (err) {
-      alert("Analysis failed. Verify your backend server status.");
+      alert("Analysis failed. Please try again.");
     } finally {
       setLoading(false);
       setStatusMessage("");
+      setDeviceDownloadProgress(null);
     }
   };
 
@@ -601,7 +669,11 @@ export default function App() {
             className="w-full p-3 border border-[#cfc5b6] rounded-sm bg-[#fffdf8] text-sm text-[#1b1a18] placeholder:text-[#8b8378] focus:ring-2 focus:ring-[#27558a] outline-none"
             placeholder="Paste raw SMS, email body, notice text, or verify extracted OCR text here..."
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={(e) => {
+              setInputText(e.target.value);
+              setSourceType("text");
+              setUploadNote("");
+            }}
           />
 
           <div className="flex flex-wrap gap-2">
@@ -609,7 +681,11 @@ export default function App() {
               <button
                 key={label}
                 type="button"
-                onClick={() => setInputText(example)}
+                onClick={() => {
+                  setInputText(example);
+                  setSourceType("text");
+                  setUploadNote("");
+                }}
                 className="px-3 py-2 text-xs font-medium text-[#27558a] bg-[#edf2f7] border border-[#b9c8d8] rounded-sm hover:bg-[#e2eaf2] transition"
               >
                 {label}
@@ -627,6 +703,26 @@ export default function App() {
 
           {statusMessage && (
             <p className="text-xs text-center text-[#625d55]">{statusMessage}</p>
+          )}
+
+          {deviceDownloadProgress !== null && (
+            <div
+              className="w-full h-2 rounded-sm bg-[#e8e1d6] border border-[#cfc5b6] overflow-hidden"
+              role="progressbar"
+              aria-label="On-device model download"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow={deviceDownloadProgress}
+            >
+              <div
+                className="h-full bg-[#52765d] transition-all"
+                style={{ width: `${deviceDownloadProgress}%` }}
+              />
+            </div>
+          )}
+
+          {uploadNote && (
+            <p className="text-xs text-[#625d55] leading-relaxed">{uploadNote}</p>
           )}
         </section>
 
@@ -750,6 +846,15 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                {inferenceBadge && (
+                  <span
+                    className={`px-2 py-1 rounded-sm border font-semibold ${INFERENCE_BADGE_STYLES[inferenceBadge.tone] || INFERENCE_BADGE_STYLES.rules}`}
+                    title={inferenceBadge.detail}
+                  >
+                    {inferenceBadge.label}
+                  </span>
+                )}
+
                 <span className={`px-2 py-1 rounded-sm border font-semibold ${riskStyles.badge}`}>
                   {results.risk_level} risk
                 </span>
@@ -763,6 +868,13 @@ export default function App() {
                 </span>
               </div>
             </div>
+
+            {inferenceBadge && (
+              <div className="text-[11px] leading-relaxed text-[#625d55]">
+                {inferenceBadge.detail}
+              </div>
+            )}
+
 
             <div className={`border-b pb-5 space-y-4 ${riskStyles.border}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

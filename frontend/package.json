@@ -9,10 +9,11 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "check:rules-parity": "node scripts/check-rules-parity.mjs",
-    "test": "node --test test/analysis.test.js test/firebaseInference.test.js test/hybridAnalyze.test.js",
+    "test": "node --test test/analysis.test.js test/firebaseInference.test.js test/hybridAnalyze.test.js test/inferenceStatus.test.js test/uploadPipeline.test.js test/appIntegration.test.js",
     "test:analysis": "node --test test/analysis.test.js",
     "test:inference": "node --test test/firebaseInference.test.js",
-    "test:hybrid": "node --test test/hybridAnalyze.test.js"
+    "test:hybrid": "node --test test/hybridAnalyze.test.js",
+    "test:integration": "node --test test/inferenceStatus.test.js test/uploadPipeline.test.js test/appIntegration.test.js"
   },
   "dependencies": {
     "firebase": "^13.4.0",

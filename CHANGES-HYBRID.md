@@ -326,3 +326,74 @@ Stage 4 Part 2 needs a tested inference service before routing can be added. Kee
 1. Run `cd frontend && npm run test:hybrid`. All 22 routing tests should pass.
 2. Run `npm test` to confirm all 51 tests pass.
 3. Run `npm run check:rules-parity`, `npm run lint`, and `npm run build`.
+
+## Stage 5 — Hybrid analysis integrated into App.jsx
+
+**Built**
+
+- Replaced the ordinary-text `/api/analyze` fetch with a direct `hybridAnalyze()` call from the Analyze click handler.
+- Passed the Firebase AI instance from `firebase.js` into both hybrid text analysis and image extraction.
+- Preserved the existing input, sample-message, speech, share/export, validation, loading, and results-rendering flows.
+- Added actual-path inference badges in the existing results area:
+  - `Checked on your device`
+  - `Sent to cloud` with the returned reason and requested/actual path when they differ
+  - `Rules only (AI unavailable)`
+- Added a visible reason line under the results summary. The badge always uses `path`, never `requestedPath`.
+- Added device model download progress using `onStatus`, including a progress bar and percentage status text.
+- Forwarded Pyodide rule-engine loading status from `hybridAnalyze()` into the App so first-use engine loading is visible.
+- Added image handling for JPEG/PNG:
+  - validates the upload type,
+  - extracts text with Firebase AI Logic using cloud multimodal inference (`generateContent` with an `inlineData` JPEG/PNG part),
+  - sends only the extracted text into `hybridAnalyze()`,
+  - keeps the final text-analysis path independent from the image-extraction path.
+- Added a note that image text was extracted in the cloud while the final analysis may run on-device or in the cloud.
+- Kept PDF handling on FastAPI `/api/extract-text`.
+- Added `sourceType: "pdf"` for extracted PDF text, forcing cloud analysis.
+- Added a PDF note that extraction happens on the server before analysis.
+- Added `uploadPipeline.js` to classify PDF/image/unsupported uploads and keep upload processing separate from the App UI.
+- Added `inferenceStatus.js` for badge and status-message mapping.
+- Extended `extractImageText()` and `createCloudVisionModel()` in the Firebase inference service.
+- Did not modify `backend/`, the Python rule engine, the Stage 3 response builder, or existing Learn/Practice flows.
+
+**Verification results**
+
+- `npm test`: **65/65 passing**
+- `npm run test:analysis`: **10/10 passing**
+- `npm run test:inference`: **23/23 passing**
+- `npm run test:hybrid`: **23/23 passing**
+- `npm run test:integration`: **9/9 passing**
+- `npm run lint`: passes; only pre-existing `App.jsx` warnings remain
+- `npm run build`: passes
+- New integration tests cover `hybridAnalyze()` usage instead of `/api/analyze`, PDF extraction through `/api/extract-text`, image extraction through cloud vision, badge actual-path behavior, and status messages for first-use rule loading and device download progress.
+
+**Files changed**
+
+- `frontend/src/App.jsx`
+- `frontend/src/hybridAnalyze.js`
+- `frontend/src/analysis/firebaseInference.js`
+- `frontend/src/analysis/index.js`
+- `frontend/src/inferenceStatus.js`
+- `frontend/src/uploadPipeline.js`
+- `frontend/test/firebaseInference.test.js`
+- `frontend/test/hybridAnalyze.test.js`
+- `frontend/test/inferenceStatus.test.js`
+- `frontend/test/uploadPipeline.test.js`
+- `frontend/test/appIntegration.test.js`
+- `frontend/package.json`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm test`.
+2. Run the individual test scripts: `npm run test:analysis`, `npm run test:inference`, `npm run test:hybrid`, `npm run test:integration`.
+3. Run `npm run lint` and `npm run build`.
+4. Browser checks:
+   - Short English text: verify the badge says **Checked on your device** when the SDK reports `on_device`.
+   - Hindi text: verify **Sent to cloud** with a language reason.
+   - Long English text: verify **Sent to cloud** with a length reason.
+   - JPEG/PNG upload: verify the cloud extraction status and note, then verify the final badge reflects the final text-analysis path.
+   - PDF upload: verify the server-extraction note and that the final badge is cloud.
+   - Device unavailable or failure: verify one cloud fallback and **Sent to cloud**.
+   - Both AI paths fail: verify **Rules only (AI unavailable)** and that the rule-based score/risk remain visible.
+   - First analysis: verify the Pyodide loading status appears.
+   - Model download: verify the download progress bar and percentage appear.
