@@ -11,6 +11,11 @@ The project combines a deterministic Python rule engine with hybrid AI inference
 - Pyodide runs the existing Python rules in a browser Web Worker;
 - a small FastAPI service handles PDF text extraction.
 
+## Try it live
+
+- **Live application:** https://red-flagged-hybrid.vercel.app/
+- **Backend API documentation:** https://redflagged-hybrid-backend.onrender.com/docs
+
 > RedFlagged does not determine the legal validity or authenticity of a document and does not provide legal advice. It highlights warning signs and suggests safer verification steps.
 
 ## What it does
@@ -131,7 +136,7 @@ PDF uploads go to the FastAPI `/api/extract-text` endpoint, which uses `pypdf`. 
 | Backend | FastAPI, `pypdf`, `python-multipart` |
 | Security | Firebase App Check with reCAPTCHA Enterprise |
 | Frontend deployment | Vercel |
-| Backend deployment | Render or another Python/FastAPI host |
+| Backend deployment | Render  |
 
 ## Repository structure
 
@@ -229,6 +234,7 @@ For local PDF extraction, set:
 
 ```env
 VITE_API_URL=http://127.0.0.1:8000
+Use this URL when running the backend locally. For the deployed backend, use https://redflagged-hybrid-backend.onrender.com instead.
 ```
 
 ## Environment variables
@@ -262,7 +268,7 @@ Production setup requires:
 3. Set `VITE_RECAPTCHA_SITE_KEY` in Vercel.
 4. Do not ship the development debug token.
 
-Production App Check configuration has not been verified in this repository. It must be confirmed in the Firebase and Google Cloud consoles.
+Production App Check configuration must be verified against the current Firebase and Google Cloud project settings.
 
 ## Deployment overview
 
@@ -283,7 +289,7 @@ https://red-flagged-hybrid.vercel.app/
 
 Confirm the current deployment status separately. The repository does not contain a `vercel.json`.
 
-### Backend: Render or another FastAPI host
+### Backend: Render 
 
 Deploy the `backend/` folder as a Python web service.
 
@@ -377,7 +383,7 @@ These are regression notes, not a claim of exhaustive validation.
 - **No separate Learn/Practice screens** exist in this repository snapshot; the existing analysis, sample-message, speech, share, and export flows were preserved.
 - **Knowledge coverage:** The curated knowledge base and domain list cover selected scenarios, not every institution or scam pattern.
 - **Read-aloud voices:** Browser voice availability depends on the user's installed voices.
-- **Production configuration:** App Check domain allowlisting, Vercel environment variables, the backend URL, and CORS must be configured and verified before deployment.
+- **Production configuration:** App Check domain allowlisting, Vercel environment variables, the backend URL, and CORS must be configured and verified for the production deployment.
 
 ## Roadmap
 
