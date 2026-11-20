@@ -219,4 +219,110 @@ Stage 4 Part 2 needs a tested inference service before routing can be added. Kee
 1. Run `cd frontend && npm run test:inference`. All 19 inference-service tests should pass.
 2. Run `npm run test:analysis` to confirm Stage 3 remains intact.
 3. Run `npm run lint` and `npm run build`.
-4. Part 1 is not wired into the UI yet. Part 2 will add routing and the requested/actual path reporting.
+4. Part 1 is not wired into the UI yet. Part 2 adds routing and requested/actual path reporting.
+
+## Stage 4 Part 2 — Hybrid routing layer
+
+**Built**
+
+- Added `frontend/src/hybridAnalyze.js`, which orchestrates:
+  - the Stage 2 Python rule engine through `analyzeRules()`,
+  - the Stage 3 knowledge, prompt, and response builders,
+  - the Stage 4 Part 1 Firebase inference service.
+- Added `chooseRequestedPath()` with these rules:
+  - PDF source: cloud.
+  - Detected language not `en`: cloud.
+  - Message longer than 8,000 characters: cloud.
+  - Estimated prompt + schema tokens above the on-device budget: cloud.
+  - Otherwise: device.
+- Derived the on-device budget from the 9,216-token limit:
+  - 2,500 tokens reserved for output.
+  - 15% safety factor.
+  - `ON_DEVICE_INPUT_TOKEN_BUDGET = 5708`.
+  - Conservative estimator: `ceil(code points / 3)`.
+- Added explicit manual fallback:
+  - device eligibility + availability → call device once,
+  - any device initialization, generation, parsing, or validation failure → call cloud once,
+  - cloud-only route failure → rules-only fallback,
+  - both paths failing → rules-only fallback.
+- Starts device availability/initialization before the Pyodide rule engine resolves for short input that is unlikely to be classified as Hindi (using the same >20% Devanagari threshold) so Chrome's user-activation requirement is met. The final routing decision still uses the Python-detected language and full prompt size.
+- Reads the SDK-reported `result.response.inferenceSource` for every successful AI call and maps it to `actualPath`.
+- Returns metadata separately:
+  - `path`: `"device" | "cloud" | "rules-only"`
+  - `requestedPath`: `"device" | "cloud"`
+  - `actualPath`: `"device" | "cloud" | null`
+  - `inferenceSource`: raw SDK value
+  - `reason`: human-readable explanation
+  - `deviceAvailability`, `deviceError`, `cloudError`
+- The final `analysis` object always takes score, risk level, flags, evidence, and URL classification from the Python rule result.
+- Added status events for rules, device availability, initialization, download progress, generation, fallback, and completion.
+- Did not modify `App.jsx`, backend files, the Python rule engine, or the Stage 3 response builder.
+
+**Verification results**
+
+- `npm test`: **41/41 passing**
+- `npm run test:hybrid`: **12/12 passing**
+- `npm run test:inference`: **19/19 passing**
+- `npm run test:analysis`: **10/10 passing**
+- `npm run lint`: passes; only the pre-existing `App.jsx` warnings remain.
+- `npm run build`: passes.
+- Hybrid tests cover short English device success, Hindi cloud routing, long English cloud routing, PDF routing, requested vs actual source reporting, device initialization failure, device JSON failure, both paths failing, cloud-only failure, and rule-engine score/risk preservation.
+
+**Files changed**
+
+- `frontend/src/hybridAnalyze.js`
+- `frontend/test/hybridAnalyze.test.js`
+- `frontend/package.json`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm run test:hybrid`. All 12 routing tests should pass.
+2. Run `npm test` to confirm all 41 tests pass.
+3. Run `npm run lint` and `npm run build`.
+4. Part 2 is still not connected to `App.jsx`. Stage 5 will replace the `/api/analyze` fetch, pass the Firebase `ai` instance, and add the visible path badge.
+
+### Stage 4 Part 2 hardening
+
+**Built**
+
+- Mirrored the exact Python language precheck from `backend/rules.py detect_language()`:
+  - collect alphabetic characters (`isalpha()` in Python, Unicode letter matching in JS),
+  - count Devanagari characters in the `0x0900–0x097F` range,
+  - classify as likely Hindi only when the ratio is strictly greater than `0.20`.
+- Updated the early device-initialization candidate check to use that ratio instead of skipping any text containing Devanagari. Mixed-script messages that Python classifies as English now start device initialization early.
+- Normalized PDF source values with `isPdfSource()`:
+  - `pdf`, `PDF`, `application/pdf`, and `application/pdf; ...` all select cloud.
+  - PDF extraction remains on FastAPI; extracted PDF text can enter hybrid analysis and is never eligible for device inference.
+- Added a final response-construction safety net:
+  - if `buildAnalysisResponse()` throws, the result switches to `path: "rules-only"`,
+  - `actualPath` and `inferenceSource` are cleared,
+  - the existing rules-only fallback is returned,
+  - the construction error is exposed as `responseError`.
+- Preserved fallback behavior:
+  - at most one explicit cloud attempt after a device failure,
+  - rules-only fallback if inference or final response construction fails.
+- Did not modify `App.jsx`, backend behavior, Python rules, or the Stage 3 response builder.
+
+**Verification results**
+
+- `npm test`: **51/51 passing**
+- `npm run test:analysis`: **10/10 passing**
+- `npm run test:inference`: **19/19 passing**
+- `npm run test:hybrid`: **22/22 passing**
+- `npm run check:rules-parity`: 30/30 score/level/flags parity; full result parity; knowledge parity
+- `npm run lint`: passes; only the pre-existing `App.jsx` warnings remain
+- `npm run build`: passes
+- New hybrid tests cover mixed-script English early initialization, pure Hindi non-initialization, missing/unexpected `inferenceSource` on device and cloud, structurally invalid device JSON, cloud responses reporting `on_device`, PDF source variants, AI override attempts against Python-owned fields, and final response-construction failure.
+
+**Files changed**
+
+- `frontend/src/hybridAnalyze.js`
+- `frontend/test/hybridAnalyze.test.js`
+- `CHANGES-HYBRID.md`
+
+**How to test**
+
+1. Run `cd frontend && npm run test:hybrid`. All 22 routing tests should pass.
+2. Run `npm test` to confirm all 51 tests pass.
+3. Run `npm run check:rules-parity`, `npm run lint`, and `npm run build`.
