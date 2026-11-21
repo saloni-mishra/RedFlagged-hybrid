@@ -297,6 +297,8 @@ No wildcard origin is used. Secrets stay in environment variables or untracked `
 - PDF extraction depends on the FastAPI backend and `pypdf`.
 - Reading aloud depends on browser-installed voices.
 - Hinglish explanations are produced in English; Gujarati is not supported.
+- **PDF line breaks:** Long URLs split across lines in a PDF can be extracted as partial URLs.
+- **Rule coverage gaps:** Some scam wording is not matched. A Hindi message asking for a UPI PIN to receive cashback scores MEDIUM, and the courier rule can miss customs wording inside a long PDF notice.
 
 
 ## 12. Testing
@@ -327,13 +329,10 @@ python -B t.py
 
 The 30-message script currently reports `failures: 0`.
 
-The backend pytest files require `pytest`; it is not installed in the current environment, so those tests could not be run without installing dependencies.
+Manually verified:
 
-Manual verification still required:
-
-- Real Chrome on-device inference and model download
-- Real Firebase cloud inference with production App Check
-- Real JPEG/PNG extraction
-- Real PDF extraction through the deployed backend and CORS
-- Device-unavailable cloud fallback
-- Rules-only fallback with network/cloud failure
+- English text analyzed on-device ("Checked on your device"), including with Wi-Fi off after the model and rule engine were loaded.
+- Hindi text routed to the cloud with the reason shown.
+- Mixed and Roman-script Hindi messages analyzed on-device.
+- A benign message scored LOW.
+- PDF upload through the deployed backend, then cloud analysis.
