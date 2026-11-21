@@ -11,6 +11,17 @@ The project combines a deterministic Python rule engine with hybrid AI inference
 - Pyodide runs the existing Python rules in a browser Web Worker;
 - a small FastAPI service handles PDF text extraction.
 
+**Existing before the contest:** the FastAPI backend, the Python rule engine (`rules.py`, `knowledge.py`), and the React interface.
+
+**Built during the contest:**
+- Firebase AI Logic integration (`firebase/ai`) for hybrid on-device/cloud inference, with `InferenceMode` routing and a rules-only fallback.
+- On-device Gemini Nano analysis for short English text via Chrome's Prompt API. It works offline once the model is downloaded.
+- Cloud analysis (Gemini via Firebase AI Logic) for Hindi, long text, and PDF-derived text, plus JPEG/PNG text extraction.
+- Firebase App Check (reCAPTCHA Enterprise in production, debug token in development).
+- The existing Python rules now run in the browser through Pyodide in a Web Worker, so scoring works without a server and gives identical results (30/30 parity tests).
+- An inference-source badge that shows where the analysis actually ran ("Checked on your device" or "Sent to cloud"), with the reason.
+- The frontend no longer sends the Gemini API key or the analysis call through the backend. The backend now only handles PDF text extraction.
+
 ## Try it live
 
 - **Live application:** https://red-flagged-hybrid.vercel.app/
@@ -263,12 +274,10 @@ Never commit `.env`, `.env.local`, API keys, debug tokens, or credentials.
 
 Production setup requires:
 
-1. Register the Vercel domain in Firebase App Check.
+1. Register the web app in Firebase App Check with reCAPTCHA Enterprise.
 2. Add the production domain to the reCAPTCHA Enterprise site-key allowlist.
 3. Set `VITE_RECAPTCHA_SITE_KEY` in Vercel.
 4. Do not ship the development debug token.
-
-Production App Check configuration must be verified against the current Firebase and Google Cloud project settings.
 
 ## Deployment overview
 
@@ -353,8 +362,6 @@ python -B t.py
 
 The 30-message regression script currently passes with `failures: 0`.
 
-The pytest files in `backend/` require `pytest` (not listed in `backend/requirements.txt` in this environment). They were not run as part of the final checks.
-
 ## Historical regression notes
 
 - **Negation-aware urgency detection:** A nearby negation in the same clause can prevent a false urgency match. A benign “no urgent deadline” message remains LOW.
@@ -366,7 +373,7 @@ These are regression notes, not a claim of exhaustive validation.
 
 ## Known limitations and untested areas
 
-- **Live integration testing:** The automated tests use mocked AI models and responses. Real browser, Firebase AI Logic, App Check, image upload, and PDF upload tests still require a configured environment.
+- **Live testing:** Automated tests use mocked AI responses. The live deployment was tested manually; see "Manually verified" belo.
 - **On-device availability:** Chrome desktop support, Gemini Nano availability, model download, and user-activation behavior vary by device and browser version.
 - **On-device language support:** Hindi/Devanagari text is routed to cloud inference. Short English text is the on-device candidate.
 - **On-device limits:** The app uses a conservative estimate against the 9,216-token on-device limit because the SDK does not expose an exact on-device token count. The limits are not exact tokenization.
@@ -383,8 +390,19 @@ These are regression notes, not a claim of exhaustive validation.
 - **No separate Learn/Practice screens** exist in this repository snapshot; the existing analysis, sample-message, speech, share, and export flows were preserved.
 - **Knowledge coverage:** The curated knowledge base and domain list cover selected scenarios, not every institution or scam pattern.
 - **Read-aloud voices:** Browser voice availability depends on the user's installed voices.
-- **Production configuration:** App Check domain allowlisting, Vercel environment variables, the backend URL, and CORS must be configured and verified for the production deployment.
+- **PDF line breaks:** Long URLs split across lines in a PDF can be extracted as partial URLs.
+- **Rule coverage gaps:** Some scam wording is not matched. A Hindi message asking for a UPI PIN to receive cashback scores MEDIUM, and the courier rule can miss customs wording inside a long PDF notice.
 
+## Manually verified
+
+Tested on the live deployment:
+
+- English text analyzed on-device ("Checked on your device"), including with Wi-Fi off after the model and rule engine were loaded.
+- Hindi text routed to the cloud with the reason shown.
+- Mixed and Roman-script Hindi messages analyzed on-device.
+- A benign message scored LOW.
+- PDF upload through the deployed backend, then cloud analysis.
+  
 ## Roadmap
 
 - Add broader language coverage and better Roman-script Hindi handling.
